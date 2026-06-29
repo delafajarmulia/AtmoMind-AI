@@ -1,8 +1,8 @@
-# 🌡️ Analisis & Prediksi Data Cuaca IoT
+# 🌡️ Analisis & Prediksi Cuaca IoT — Random Forest + Explainable AI (SHAP)
 
-> Proyek Mata Kuliah **Kecerdasan Buatan** — Kelompok 1, Kelas TI-1C
+> Proyek Mata Kuliah **Kecerdasan Buatan** — Kelompok AtmoMind, Kelas TI-1C
 
-Analisis data time series dari sensor IoT yang dipasang di **teras outdoor** menggunakan Python. Mencakup eksplorasi data (EDA), penanganan missing values akibat gangguan jaringan dengan **imputasi data eksternal**, hingga prediksi suhu menggunakan Regresi Linear, Random Forest, ARIMA, dan ARIMAX.
+Analisis data time series dari sensor IoT yang dipasang di **teras outdoor** menggunakan Python. Mencakup eksplorasi data (EDA), penanganan missing values akibat gangguan jaringan dengan **imputasi data eksternal**, hingga prediksi suhu, kelembapan, dan cahaya menggunakan **Random Forest**, diperkuat dengan **Explainable AI (XAI) berbasis SHAP** untuk menjelaskan alasan di balik setiap prediksi.
 
 ---
 
@@ -16,7 +16,7 @@ Analisis data time series dari sensor IoT yang dipasang di **teras outdoor** men
 | 4  | *Muhammad Fadhil* | *4.33.25.2.15* |
 | 5  | *Ulfan Nayaka Dipta* | *4.33.25.2.23* |
 
-> **Kelas:** TI-1C &nbsp;|&nbsp; **Kelompok:** 1 &nbsp;|&nbsp; **Mata Kuliah:** Kecerdasan Buatan
+> **Kelas:** TI-1C &nbsp;|&nbsp; **Kelompok:** AtmoMind &nbsp;|&nbsp; **Mata Kuliah:** Kecerdasan Buatan
 
 ---
 
@@ -24,17 +24,10 @@ Analisis data time series dari sensor IoT yang dipasang di **teras outdoor** men
 
 ```
 ├── 📁 dataset
-│   ├── 📁 externals
-│   │   ├── 📄 open-meteo.csv
-│   │   └── 📄 visual-crossing.csv
-│   └── 📁 sensors
-│       ├── 📄 DataCuaca-Data-1.csv
-│       ├── 📄 sensor_data_2.csv
-│       └── 📄 sensor_data_3.csv
+│   ├── 📄 open_meteo_tubes.csv
+│   └── 📄 sensor_data_tubes.csv
 ├── 📝 README.md
-├── 📄 weather_analysis_1.ipynb
-├── 📄 weather_analysis_2.ipynb
-└── 📄 weather_analysis_3.ipynb
+└── 📄 weather_analysis_rf_shap.ipynb
 ```
 
 ---
@@ -53,7 +46,7 @@ Analisis data time series dari sensor IoT yang dipasang di **teras outdoor** men
 
 ## 📊 Dataset
 
-### Dataset Primer — `sensor_data_3.csv`
+### Dataset Primer — `sensor_data_tubes.csv`
 
 | Kolom | Tipe | Keterangan |
 |-------|------|-----------|
@@ -64,40 +57,42 @@ Analisis data time series dari sensor IoT yang dipasang di **teras outdoor** men
 | `cahaya` | int | Nilai ADC sensor LDR (0–4095) |
 | `kondisi` | string | `TERANG` / `GELAP` — ditentukan firmware |
 
-### Dataset Eksternal
+### Dataset Eksternal — `open_meteo_tubes.csv`
 
-| File | Sumber | Keterangan |
-|------|--------|-----------|
-| `open-meteo.csv` | Open-Meteo API | Suhu, kelembapan, radiasi, tutupan awan — hourly, GMT+7 |
-| `visual-crossing.csv` | Visual Crossing | Suhu, kelembapan, solar radiation, angin, tekanan — hourly, GMT+7 |
+| Sumber | Isi | Resolusi |
+|--------|-----|----------|
+| Open-Meteo API | Suhu udara (`temperature_2m`) | Hourly, GMT+7 |
+
+> File ini berisi 3 blok di dalam satu CSV: metadata lokasi, snapshot kelembapan/tekanan "current" (1 baris saja, bukan time-series), dan time-series suhu hourly. **Hanya blok hourly suhu yang dipakai** untuk imputasi — kelembapan dan cahaya tidak punya sumber eksternal historis yang sesuai pada data ini.
 
 ### ⚠️ Catatan Penting Sensor
 
 - **Lokasi:** Teras outdoor — terpapar sinar matahari langsung
-- **Periode:** 13–22 April 2026 · 2.082 record · interval ~5 menit
-- **Timezone:** Kolom `created_at` dalam **UTC (GMT+0)**, dikonversi ke **WIB (GMT+7)** saat preprocessing
+- **Periode:** 10–29 Juni 2026 · 4.807 record asli · interval target ~5 menit
+- **Timezone:** Kolom `created_at` dalam **UTC (GMT+0)**, dikonversi ke **WIB (GMT+7)** saat preprocessing. Open-Meteo hourly sudah dalam local time GMT+7 sejak sumbernya, jadi cukup di-*localize*, bukan dikonversi
 - **Sensor LDR terbalik:** Nilai `cahaya` raw **tinggi = gelap**, **rendah = terang** (karakteristik fisika LDR). Koreksi: `cahaya_terkoreksi = 4095 - cahaya_raw`
-- **Gap besar:** 2 gap >1 jam (~15.4 jam pada 13–14 Apr, ~12.7 jam pada 18–19 Apr) akibat gangguan jaringan → diisi dari **data eksternal**
-- **Gap kecil:** 3 gap (30–38 menit) → diisi **interpolasi linear**
+- **Audit gap:** dari total ±5.388 slot grid 5-menit, 503 slot (9,3%) kosong akibat gangguan pengiriman — gap terbesar 169 menit (2,8 jam), 4 gap di atas 60 menit
+- **Strategi imputasi:** seluruh gap suhu diisi dari Open-Meteo hourly (di-upsample ke 5 menit, dikalibrasi dengan offset median +1,94 °C terhadap data sensor asli yang overlap). Kelembapan & cahaya diisi interpolasi linear karena tidak ada sumber eksternal historis untuk kedua variabel ini
 
 ---
 
 ## 📓 Notebook
 
-### `weather_analysis_3.ipynb` — Analisis Utama
+### `weather_analysis_rf_shap.ipynb` — Analisis Utama
 
 | # | Bagian | Deskripsi |
 |---|--------|-----------|
-| 1 | Import Library | pandas, numpy, matplotlib, seaborn, statsmodels, sklearn |
-| 2 | Load & Inspect | Muat 3 sumber data, cek struktur dan tipe kolom |
-| 3 | Preprocessing | Konversi UTC→WIB, koreksi nilai LDR, sorting |
-| 4 | Audit Kualitas Data | Deteksi gap besar & kecil, distribusi jitter interval |
-| 5 | **Imputasi Cerdas** | Gap besar → data eksternal (Open-Meteo + Visual Crossing, dengan kalibrasi offset); Gap kecil → interpolasi linear |
-| 6 | Feature Engineering | Fitur temporal, siklus sin/cos, flag siang/malam, fitur eksternal |
-| 7 | EDA | Univariat · Bivariat · Multivariat · Time-Series Story · Heatmap Jam×Tanggal |
+| 1 | Import Library | pandas, numpy, matplotlib, seaborn, scikit-learn, **SHAP** |
+| 2 | Load & Inspect | Muat sensor IoT + Open-Meteo (parsing CSV multi-section) |
+| 3 | Preprocessing | Konversi UTC→WIB, koreksi nilai LDR |
+| 4 | Audit Kualitas Data | Deteksi gap pengiriman, distribusi interval |
+| 5 | **Imputasi** | Suhu → Open-Meteo terkalibrasi; Kelembapan & Cahaya → interpolasi linear |
+| 6 | Feature Engineering | Fitur temporal, siklus sin/cos, flag siang/malam, lag & rolling (dihitung di grid 5 menit kontinu agar tidak melompat gap) |
+| 7 | EDA | Univariat · Bivariat · Time-Series Story · Pola Diurnal |
 | 8 | Deteksi Outlier | IQR + Z-Score, visualisasi pada timeline |
-| 9 | Prediksi Suhu | Linear Regression · Random Forest · ARIMA(2,1,2) WF · ARIMAX(2,1,2) WF |
-| 10 | Kesimpulan | Ringkasan temuan, perbandingan model, keterbatasan, rekomendasi |
+| 9 | **Random Forest** | 3 model terpisah: Suhu, Kelembapan, Cahaya |
+| 10 | **Explainable AI (SHAP)** | Summary plot, dependence plot, waterfall & force plot per-prediksi |
+| 11 | Kesimpulan | Ringkasan temuan, insight SHAP, keterbatasan, rekomendasi |
 
 ---
 
@@ -105,24 +100,50 @@ Analisis data time series dari sensor IoT yang dipasang di **teras outdoor** men
 
 | Variabel | Temuan |
 |----------|--------|
-| **Suhu** | Rentang 24–47°C · Puncak rata-rata ~14:00–15:00 WIB · Terendah ~05:00 WIB |
-| **Kelembapan** | Korelasi negatif kuat dengan suhu (r ≈ −0.97) · Malam >95% · Siang <45% |
-| **Cahaya** | Setelah koreksi LDR: korelasi positif dengan suhu (r ≈ +0.72) — masuk akal secara fisik |
+| **Suhu** | Rentang 23,2–39,3°C · Puncak rata-rata ~14:00 WIB (±36°C) · Terendah ~05:00–06:00 WIB (±25,5°C) |
+| **Kelembapan** | Korelasi negatif kuat dengan suhu (r ≈ −0,92) · Malam ~87% · Siang terendah ~43% (pukul 14:00) |
+| **Cahaya** | Setelah koreksi LDR: korelasi positif dengan suhu (r ≈ +0,70), negatif dengan kelembapan (r ≈ −0,73) — masuk akal secara fisik |
 | **Transisi** | Sensor GELAP→TERANG ~06:00 WIB, TERANG→GELAP ~18:00 WIB |
-| **Validasi Eksternal** | Sensor vs Open-Meteo R² > 0.7 · Offset sistematis +1.1–1.5°C wajar karena paparan langsung matahari |
+| **Kalibrasi Eksternal** | Sensor vs Open-Meteo: offset sistematis +1,94°C — wajar karena sensor teras terpapar langsung matahari, sedangkan Open-Meteo bersifat reanalysis area luas |
 
 ---
 
-## 🤖 Hasil Prediksi
+## 🤖 Hasil Prediksi — Random Forest
 
-| Model | Tipe | Pakai Data Eksternal | MAE | RMSE | R² |
-|-------|------|----------------------|-----|------|-----|
-| Linear Regression | ML | ✅ Ya (fitur) | ~0.41°C | ~0.58°C | ~0.95 |
-| Random Forest | ML | ✅ Ya (fitur) | ~0.29°C | ~0.50°C | ~0.97 |
-| ARIMA(2,1,2) Walk-Forward | Statistik | ❌ Tidak | ~0.40°C | ~0.60°C | ~0.95 |
-| **ARIMAX(2,1,2) Walk-Forward** | **Statistik** | **✅ Ya (eksogen)** | **~0.24°C** | **~0.50°C** | **~0.98** |
+| Target | MAE | RMSE | R² |
+|--------|-----|------|-----|
+| Suhu (°C) | 0,168 | 0,255 | 0,994 |
+| Kelembapan (%) | 0,700 | 0,984 | 0,997 |
+| Intensitas Cahaya | 51,08 | 94,67 | 0,996 |
 
-**Random Forest** dan **ARIMAX** adalah model terbaik. Kunci keberhasilan: **fitur lag** (suhu 5–15 menit sebelumnya) sebagai prediktor utama, diperkuat data cuaca eksternal sebagai konteks.
+Ketiga model memperoleh **R² > 0,99**, didorong utamanya oleh autokorelasi alami sensor IoT pada skala 5 menit — nilai 5 menit lalu adalah prediktor yang sangat kuat untuk nilai sekarang. Evaluasi dilakukan terhadap data sensor **asli** (bukan hasil imputasi), agar metrik mencerminkan kemampuan model yang sesungguhnya.
+
+---
+
+## 🧠 Explainable AI (XAI) dengan SHAP
+
+Random Forest akurat, tapi secara default ia adalah *black box*. **SHAP (SHapley Additive exPlanations)** dipakai untuk menjelaskan *mengapa* model memprediksi nilai tertentu — bukan cuma *seberapa penting* suatu fitur secara umum (seperti `feature_importances_` bawaan), tapi kontribusi pasti tiap fitur (dalam satuan asli: °C, %, dst.) pada **setiap prediksi individual**.
+
+### Insight Global (Mean |SHAP value|)
+
+| Target | Fitur Paling Dominan | Kontribusi | Fitur Berikutnya |
+|--------|----------------------|------------|-------------------|
+| Suhu | `suhu_lag1` (suhu 5 menit lalu) | ~45% | `suhu_roll6_mean`, `suhu_lag2` |
+| Kelembapan | `lembap_lag1` | ~96% | `cahaya_lag1`, `hari_ke` |
+| Cahaya | `cahaya_lag1` | ~75% | `is_malam`, `hari_ke` |
+
+- **Suhu**: prediksi didominasi momentum jangka pendek — kombinasi nilai 5 menit lalu dan rata-rata 30 menit terakhir
+- **Kelembapan**: berubah sangat halus antar 5 menit, jadi nilai sebelumnya hampir cukup sendirian untuk memprediksi nilai berikutnya
+- **Cahaya**: lag tetap dominan, tapi `is_malam` ikut berperan besar — masuk akal karena cahaya berubah drastis & cepat saat transisi siang-malam, sehingga model butuh sinyal konteks waktu, bukan cuma lag
+
+### Studi Kasus: Menjelaskan Prediksi Individual
+
+| Kasus | Waktu | Aktual | Prediksi | Error | Pendorong Utama |
+|-------|-------|--------|----------|-------|-------------------|
+| Paling akurat | 27/06 05:50 | 25,80°C | 25,80°C | 0,00 | `suhu_lag1`, `suhu_roll6_mean`, `suhu_lag2` — semua menurunkan prediksi searah (konsisten) |
+| Paling meleset | 26/06 14:10 | 36,90°C | 35,66°C | 1,24 | `suhu_roll6_mean` & `suhu_lag1` menaikkan, tapi rolling mean masih "tertinggal" dari kenaikan suhu yang tajam |
+
+Waterfall & force plot pada notebook memvisualisasikan kedua kasus ini secara rinci — termasuk nilai SHAP per fitur dan arah dorongannya terhadap *base value* (rata-rata prediksi model).
 
 ---
 
@@ -138,16 +159,16 @@ cd AtmoMind-AI
 ### 2. Install dependencies
 
 ```bash
-pip install pandas numpy matplotlib seaborn statsmodels scikit-learn jupyter
+pip install pandas numpy matplotlib seaborn scikit-learn shap jupyter
 ```
 
 ### 3. Jalankan notebook
 
 ```bash
-jupyter notebook weather_analysis_3.ipynb
+jupyter notebook weather_analysis_rf_shap.ipynb
 ```
 
-> Pastikan ketiga file dataset berada di direktori yang sama dengan notebook.
+> Pastikan kedua file dataset (`sensor_data_tubes.csv` dan `open_meteo_tubes.csv`) berada di direktori yang sama dengan notebook.
 
 ---
 
@@ -157,24 +178,27 @@ jupyter notebook weather_analysis_3.ipynb
 ![Jupyter](https://img.shields.io/badge/Jupyter-Notebook-F37626?logo=jupyter&logoColor=white)
 ![pandas](https://img.shields.io/badge/pandas-150458?logo=pandas&logoColor=white)
 ![scikit--learn](https://img.shields.io/badge/scikit--learn-F7931E?logo=scikit-learn&logoColor=white)
+![SHAP](https://img.shields.io/badge/SHAP-Explainable%20AI-FF0D57?logo=python&logoColor=white)
 
 | Library | Kegunaan |
 |---------|---------|
 | `pandas` | Manipulasi data, reindex, resample |
 | `numpy` | Komputasi numerik, fitur siklus |
 | `matplotlib` & `seaborn` | Visualisasi statis |
-| `statsmodels` | Model ARIMA, ARIMAX (SARIMAX), ACF/PACF |
-| `scikit-learn` | Regresi Linear, Random Forest, evaluasi model |
+| `scikit-learn` | Random Forest, evaluasi model |
+| `shap` | Explainable AI — TreeExplainer, summary/dependence/waterfall/force plot |
 
 ---
 
 ## ⚠️ Keterbatasan
 
-- Gap besar diisi estimasi data eksternal — bukan data pengukuran sensor nyata
-- Sensor teras terpapar langsung sinar matahari (offset suhu ~1–2°C di atas udara bebas)
-- 10 hari pengamatan belum cukup untuk menangkap pola mingguan
-- Data eksternal hourly di-upsample ke 5 menit → ada efek smoothing
-- ARIMAX menggunakan rolling window 500, bukan expanding window penuh (trade-off kecepatan vs akurasi)
+- Gap suhu diisi estimasi data eksternal — bukan data pengukuran sensor nyata
+- Sensor teras terpapar langsung sinar matahari (offset suhu sistematis ~1,9°C di atas Open-Meteo)
+- Open-Meteo hanya menyediakan suhu historis pada dataset ini; kelembapan & cahaya saat gap sepenuhnya bergantung pada interpolasi linear
+- 19 hari pengamatan belum cukup untuk menangkap pola mingguan/musiman
+- Data eksternal hourly di-upsample ke 5 menit → ada efek smoothing pada periode gap
+- SHAP dihitung pada sampel test set (bukan seluruh data) untuk efisiensi komputasi
+- Evaluasi memakai split waktu 80/20 sederhana (bukan walk-forward), cukup untuk skala data 19 hari namun kurang merepresentasikan stabilitas performa pada periode lebih panjang
 
 ---
 
@@ -185,5 +209,5 @@ Proyek ini dibuat untuk keperluan akademik. Bebas digunakan sebagai referensi pe
 ---
 
 <p align="center">
-  Dibuat dengan ❤️ oleh <strong>Kelompok 1 · Kelas TI-1C</strong> · 2026
+  Dibuat dengan ❤️ oleh <strong>Kelompok AtmoMind · Kelas TI-1C</strong> · 2026
 </p>
